@@ -50,4 +50,6 @@ forward:
     https://app.example.test
 ```
 
+使い方の流れは [チュートリアル](docs/tutorial.md) を参照。
+
 `MUJIN_BIND` で転送の待ち受けアドレスを変えられる（既定 `0.0.0.0`）。
