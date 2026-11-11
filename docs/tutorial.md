@@ -143,7 +143,11 @@ mujin
 
 ## 困ったとき
 
-- **dispatch が「ジョブを開始できませんでした」で失敗する**: `--cwd` が worker の claude で信頼済みか確認してください。worker で一度 `cd <dir> && claude` を実行して信頼すれば通ります。
+dispatch が失敗したときは、worker に作った tab を mujin が閉じるので、原因を直してそのまま投げ直せます。
+
+- **「claude が起動時の確認で止まりました」**: `--cwd` が worker の claude で信頼されていません。worker で一度 `cd <dir> && claude` を実行して信頼すれば通ります。
+- **「<dir> がありません」**: `--cwd` のパスが worker にありません。`~` は worker のホームとして展開されます。
+- **「agent mujin-jN が既に worker にいます」**: 前回の dispatch が通信の切断などで途中で終わり、tab が残っています。worker の herdr で `mujin` workspace のその tab を閉じてください。
 - **ジョブが `stopped` になる**: autostop で止まった可能性があります。長いジョブは `--ttl` を長めにしてください。延ばせる上限はテンプレートの設定で決まります。
 - **worker の herdr に tab が溜まる**: 終わったジョブの tab は自動では閉じません。worker の herdr で `mujin` workspace の tab を閉じてください。
 - **ジョブの記録を消したい**: `~/.mujin/jobs/` のファイルを消すだけです。

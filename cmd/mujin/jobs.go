@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -22,20 +24,31 @@ type jobState struct {
 }
 
 // dispatchScript は worker 側で mujin 用の herdr workspace に tab を作り、claude を起動して prompt を送る。
+// 失敗したら作った pane を閉じる。残すと agent 名が埋まったままになり、次のジョブが起動できない。
 // %[1]s=cwd %[2]s=agent 名 %[3]s=prompt（いずれもクオート済み）
+// 関数の中から exit すると、ログインシェルの環境によっては bash が pop_var_context の警告を出すので、その場で exit する。
 const dispatchScript = `set -euo pipefail
-command -v jq >/dev/null || { echo "jq がありません" >&2; exit 1; }
+command -v jq >/dev/null || { echo "worker に jq がありません" >&2; exit 1; }
 herdr --version | grep -q '^herdr 0\.9\.' || { echo "herdr 0.9 系が必要です（$(herdr --version 2>&1)）" >&2; exit 1; }
-mkdir -p ~/.mujin/out
 cwd=%[1]s; cwd="${cwd/#\~/$HOME}"
+[ -d "$cwd" ] || { echo "$cwd がありません" >&2; exit 1; }
+if herdr agent get %[2]s >/dev/null 2>&1; then echo "agent %[2]s が既に worker にいます。herdr の mujin workspace から閉じてください" >&2; exit 1; fi
+mkdir -p ~/.mujin/out
 w=$(herdr workspace list | jq -r '.result.workspaces[] | select(.label=="mujin") | .workspace_id' | head -n1)
 if [ -z "$w" ]; then
   p=$(herdr workspace create --label mujin --cwd "$cwd" --no-focus | jq -r .result.root_pane.pane_id)
 else
   p=$(herdr tab create --workspace "$w" --cwd "$cwd" --label %[2]s --no-focus | jq -r .result.root_pane.pane_id)
 fi
+trap '[ $? -eq 0 ] || herdr pane close "$p" >/dev/null 2>&1 || true' EXIT
 sleep 2 # shell のプロンプトが出るのを待つ。agent start は対話プロンプトの pane にしか起動できない
-herdr agent start %[2]s --kind claude --pane "$p" --timeout 60000 >/dev/null
+if ! err=$(herdr agent start %[2]s --kind claude --pane "$p" --timeout 60000 2>&1 >/dev/null); then
+  case "$err" in
+    *agent_not_ready*) echo "claude が起動時の確認で止まりました。worker で $cwd を一度 claude で開いて信頼してください" >&2 ;;
+    *) echo "$err" >&2 ;;
+  esac
+  exit 1
+fi
 herdr agent prompt %[2]s %[3]s --wait --until working --until blocked --timeout 60000 >/dev/null
 `
 
@@ -110,12 +123,14 @@ func jobCommands() []*cobra.Command {
 					return fmt.Errorf("%s ではジョブ %s が %s です", name, j.ID, j.State)
 				}
 			}
-			if err := start(name); err != nil {
-				return err
+			if !slices.ContainsFunc(ws, func(w coder.Workspace) bool { return w.Name == name && w.LatestBuild.Status == "running" }) {
+				if err := start(name); err != nil {
+					return err
+				}
 			}
 			// 誰も接続していない herdr の処理は autostop の延長に数えられない可能性があるので、先に延ばしておく
-			if err := coder.Run("schedule", "extend", name, ttl); err != nil {
-				fmt.Fprintln(os.Stderr, "warning: 停止期限を延長できませんでした:", err)
+			if out, err := exec.Command("coder", "schedule", "extend", name, ttl).CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: 停止期限を延長できませんでした: %s\n", strings.TrimSpace(string(out)))
 			}
 			j := jobs.Job{WS: name, Cwd: cwd, TTL: ttl, CreatedAt: time.Now().Format(time.RFC3339), Prompt: prompt}
 			if err := jobs.Create(&j); err != nil {
@@ -124,7 +139,7 @@ func jobCommands() []*cobra.Command {
 			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書き、コードの変更はブランチ %[2]s に push してください。\n\n%[3]s", j.ID, j.Branch, prompt)
 			if _, err := coder.Output(name, fmt.Sprintf(dispatchScript, coder.Quote(cwd), j.Agent, coder.Quote(full))); err != nil {
 				_ = jobs.Remove(j.ID)
-				return fmt.Errorf("ジョブを開始できませんでした（--cwd が claude で信頼済みのフォルダか確認してください）: %w", err)
+				return fmt.Errorf("ジョブを開始できませんでした: %w", err)
 			}
 			fmt.Println(j.ID)
 			return nil
