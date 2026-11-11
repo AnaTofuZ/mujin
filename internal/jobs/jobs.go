@@ -20,7 +20,8 @@ type Job struct {
 	WS        string `yaml:"ws" json:"ws"`
 	Agent     string `yaml:"agent" json:"agent"`
 	Cwd       string `yaml:"cwd" json:"cwd"`
-	Branch    string `yaml:"branch" json:"branch"`
+	Branch    string `yaml:"branch,omitempty" json:"branch,omitempty"` // 空なら worker が決めて ~/.mujin/out/<ID>.branch に書く
+	Model     string `yaml:"model,omitempty" json:"model,omitempty"`
 	CreatedAt string `yaml:"created_at" json:"created_at"`
 	Extend    string `yaml:"extend,omitempty" json:"extend,omitempty"`
 	Prompt    string `yaml:"-" json:"prompt"`
@@ -82,7 +83,6 @@ func Create(j *Job) error {
 		n++
 		j.ID = fmt.Sprintf("J%d", n)
 		j.Agent = fmt.Sprintf("mujin-j%d", n)
-		j.Branch = "mujin/" + j.ID
 		f, err := os.OpenFile(path(j.ID), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 		if errors.Is(err, os.ErrExist) {
 			continue

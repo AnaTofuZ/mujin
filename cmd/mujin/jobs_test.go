@@ -41,3 +41,22 @@ func TestFetchBundle(t *testing.T) {
 		t.Fatal("前提のコミットがないのに成功した")
 	}
 }
+
+// ホーム以下のリポジトリを拾い、隠しディレクトリと node_modules の中は拾わない。
+func TestPlacesScript(t *testing.T) {
+	home := t.TempDir()
+	for _, d := range []string{"src/app", ".cache/x", "src/app/node_modules/dep"} {
+		if out, err := exec.Command("git", "init", "-q", filepath.Join(home, d)).CombinedOutput(); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+	}
+	cmd := side("", placesScript)
+	cmd.Env = append(cmd.Environ(), "HOME="+home)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(out), "- ~/src/app (origin なし)\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
