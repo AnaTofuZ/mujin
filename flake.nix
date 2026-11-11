@@ -20,7 +20,7 @@
           subPackages = [ "cmd/mujin" ];
           nativeCheckInputs = [ pkgs.git ];
           ldflags = [ "-s" "-w" ];
-          meta = { description = "Coder workspace fleet CLI for Claude Code"; mainProgram = "mujin"; platforms = systems; };
+          meta = { description = "Coder workspace fleet CLI for Claude Code"; license = pkgs.lib.licenses.mit; mainProgram = "mujin"; platforms = systems; };
         };
       });
       devShells = eachSystem (pkgs: go: {
