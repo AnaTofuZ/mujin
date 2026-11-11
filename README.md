@@ -10,6 +10,8 @@ Coder workspace と、その中の [herdr](https://herdr.dev) を束ねて、複
 
 ```sh
 go install github.com/AnaTofuZ/mujin/cmd/mujin@latest
+# または
+nix profile install github:AnaTofuZ/mujin
 ```
 
 ## コマンド
@@ -29,6 +31,10 @@ go install github.com/AnaTofuZ/mujin/cmd/mujin@latest
 | `mujin --skill` | 司令塔用の SKILL.md を出力する |
 
 ジョブの記録は `~/.mujin/jobs/<ID>.md`、回収した結果は `~/.mujin/jobs/<ID>.out.md`。
+
+## 開発
+
+`nix develop`（direnv なら `use flake`）で go、gopls、jq が入る。coder CLI はサーバーと版を合わせるため別に入れる。
 
 ## 設定
 
