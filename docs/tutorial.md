@@ -70,7 +70,7 @@ mujin dispatch ws-a "認証まわりのバグを直して。テストも通し�
 `dispatch` は次の順に動きます。
 
 1. ws-a が止まっていれば起動する
-2. 停止期限を `--ttl`（既定 8h）だけ延ばす
+2. Coder から停止予定を読み、1 時間以内に止まる予定なら警告する。延ばすのは `--extend 8h` のように指定したときだけで、今の予定より縮めることはない
 3. worker の herdr に `mujin` という workspace を作り、新しい tab で `claude` を起動する（agent 名は `mujin-j1`）
 4. prompt の先頭に「要約を `~/.mujin/out/J1.md` に書き、コードの変更はブランチ `mujin/J1` に commit する（push はしない）」という指示を付けて送る
 
@@ -151,6 +151,6 @@ dispatch が失敗したときは、worker に作った tab を mujin が閉じ�
 - **「claude が起動時の確認で止まりました」**: `--cwd` が worker の claude で信頼されていません。worker で一度 `cd <dir> && claude` を実行して信頼すれば通ります。
 - **「<dir> がありません」**: `--cwd` のパスが worker にありません。`~` は worker のホームとして展開されます。
 - **「agent mujin-jN が既に worker にいます」**: 前回の dispatch が通信の切断などで途中で終わり、tab が残っています。worker の herdr で `mujin` workspace のその tab を閉じてください。
-- **ジョブが `stopped` になる**: autostop で止まった可能性があります。長いジョブは `--ttl` を長めにしてください。延ばせる上限はテンプレートの設定で決まります。
+- **ジョブが `stopped` になる**: autostop で止まった可能性があります。`mujin ls` の DEADLINE で停止予定を確認できます。長いジョブは、管理者の運用に合わせて `--extend` で延ばすか、Coder の画面で延ばしてください。延ばせる上限はテンプレートの設定で決まります。
 - **worker の herdr に tab が溜まる**: 終わったジョブの tab は自動では閉じません。worker の herdr で `mujin` workspace の tab を閉じてください。
 - **ジョブの記録を消したい**: `~/.mujin/jobs/` のファイルを消すだけです。

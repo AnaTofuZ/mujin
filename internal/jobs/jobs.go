@@ -22,7 +22,7 @@ type Job struct {
 	Cwd       string `yaml:"cwd" json:"cwd"`
 	Branch    string `yaml:"branch" json:"branch"`
 	CreatedAt string `yaml:"created_at" json:"created_at"`
-	TTL       string `yaml:"ttl" json:"ttl"`
+	Extend    string `yaml:"extend,omitempty" json:"extend,omitempty"`
 	Prompt    string `yaml:"-" json:"prompt"`
 }
 

@@ -23,7 +23,7 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin forward [name] [-p 3000 ...]` | ポートを手元に転送する（Ctrl-C で終了） |
 | `mujin status [name]` / `mujin ca [name] [out]` | bootstrap の状態とログ / ルート CA 証明書の取得 |
 | `mujin ls [--json]` | workspace の状態と、割り当て中のジョブ |
-| `mujin dispatch <ws> "prompt" --cwd <dir> [--ttl 8h]` | 停止期限を延長し、新しい claude にジョブを投げる。ジョブ ID を出力 |
+| `mujin dispatch <ws> "prompt" --cwd <dir> [--extend 8h]` | 新しい claude にジョブを投げる。ジョブ ID を出力。停止予定を延ばすのは `--extend` を付けたときだけ |
 | `mujin wait <job>` / `mujin wait --any` | 終わるか、人間の対応が必要になるまで待つ |
 | `mujin read <job>` / `mujin attach <job>` | 結果を読む / その claude の端末に入る |
 | `mujin jobs [--json]` | ジョブの一覧と状態（`done` `running` `blocked` `check` `stopped`） |

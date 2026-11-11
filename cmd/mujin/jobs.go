@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -76,7 +75,10 @@ func jobCommands() []*cobra.Command {
 			}
 			rows := []row{}
 			for _, w := range ws {
-				r := row{Name: w.Name, Status: w.LatestBuild.Status, Deadline: w.LatestBuild.Deadline, Jobs: []jobState{}}
+				r := row{Name: w.Name, Status: w.LatestBuild.Status, Jobs: []jobState{}}
+				if d := w.LatestBuild.Deadline; !d.IsZero() {
+					r.Deadline = d.Local().Format(time.RFC3339)
+				}
 				for _, j := range st {
 					// 終わったジョブは jobs で見る。ls は今の割り当てだけを出す
 					if j.WS == w.Name && j.State != jobs.Done {
@@ -102,7 +104,8 @@ func jobCommands() []*cobra.Command {
 	}
 	ls.Flags().BoolVar(&asJSON, "json", false, "JSON で出力する")
 
-	var cwd, ttl string
+	var cwd string
+	var extend time.Duration
 	dispatch := &cobra.Command{
 		Use:   "dispatch <ws> <prompt>",
 		Short: "workspace に新しい claude を起動してジョブを投げ、ジョブ ID を出力する",
@@ -123,16 +126,21 @@ func jobCommands() []*cobra.Command {
 					return fmt.Errorf("%s ではジョブ %s が %s です", name, j.ID, j.State)
 				}
 			}
-			if !slices.ContainsFunc(ws, func(w coder.Workspace) bool { return w.Name == name && w.LatestBuild.Status == "running" }) {
+			if w, ok := coder.Find(ws, name); !ok || w.LatestBuild.Status != "running" {
 				if err := start(name); err != nil {
 					return err
 				}
+				if ws, err = coder.List(); err != nil { // 起動で停止予定が変わるので読み直す
+					return err
+				}
 			}
-			// 誰も接続していない herdr の処理は autostop の延長に数えられない可能性があるので、先に延ばしておく
-			if out, err := exec.Command("coder", "schedule", "extend", name, ttl).CombinedOutput(); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: 停止期限を延長できませんでした: %s\n", strings.TrimSpace(string(out)))
+			if err := checkDeadline(ws, name, extend); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
-			j := jobs.Job{WS: name, Cwd: cwd, TTL: ttl, CreatedAt: time.Now().Format(time.RFC3339), Prompt: prompt}
+			j := jobs.Job{WS: name, Cwd: cwd, CreatedAt: time.Now().Format(time.RFC3339), Prompt: prompt}
+			if extend > 0 {
+				j.Extend = extend.String()
+			}
 			if err := jobs.Create(&j); err != nil {
 				return err
 			}
@@ -146,7 +154,7 @@ func jobCommands() []*cobra.Command {
 		},
 	}
 	dispatch.Flags().StringVar(&cwd, "cwd", "", "worker で claude を起動するディレクトリ（claude で信頼済みのもの）")
-	dispatch.Flags().StringVar(&ttl, "ttl", "8h", "workspace の停止期限を今からこの時間だけ延ばす")
+	dispatch.Flags().DurationVar(&extend, "extend", 0, "停止予定が今からこの時間より前なら、coder schedule extend でここまで延ばす（既定は延ばさない）")
 	_ = dispatch.MarkFlagRequired("cwd")
 
 	var anyJob bool
@@ -291,6 +299,33 @@ func jobCommands() []*cobra.Command {
 	fetch.Flags().StringVar(&to, "cwd", "", "渡し先のリポジトリ（既定はジョブの --cwd と同じパス）")
 
 	return []*cobra.Command{ls, dispatch, wait, read, attach, list, fetch}
+}
+
+// checkDeadline は Coder から読んだ今の停止予定を確かめる。停止予定は人の操作やアクセスでも動く。
+// 延ばすのは extend を指定したときだけで、そのときも今の予定より縮めない（勝手に延ばすと管理者の運用とぶつかる）。
+func checkDeadline(ws []coder.Workspace, name string, extend time.Duration) error {
+	w, ok := coder.Find(ws, name)
+	if !ok {
+		return fmt.Errorf("%s が見つかりません", name)
+	}
+	if extend == 0 {
+		// shortcut: 1 時間は固定。ジョブの見込み時間が分かるようになったらそれと比べる
+		if dl := w.LatestBuild.Deadline; !dl.IsZero() && time.Until(dl) < time.Hour {
+			fmt.Fprintf(os.Stderr, "warning: %s は %s に停止予定です。ジョブの途中で止まるかもしれません（延ばすなら --extend）\n", name, dl.Local().Format("01/02 15:04"))
+		}
+		return nil
+	}
+	d, capped := w.Extension(time.Now(), extend)
+	if capped {
+		fmt.Fprintf(os.Stderr, "warning: %s はテンプレートの上限で %s に止まります\n", name, w.LatestBuild.MaxDeadline.Local().Format("01/02 15:04"))
+	}
+	if d == 0 {
+		return nil
+	}
+	if out, err := exec.Command("coder", "schedule", "extend", name, d.String()).CombinedOutput(); err != nil {
+		return fmt.Errorf("停止予定を延ばせませんでした: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // bundleScript は dir のリポジトリで branch の bundle を標準出力に書く。

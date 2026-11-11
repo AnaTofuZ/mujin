@@ -7,14 +7,44 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 type Workspace struct {
 	Name        string `json:"name"`
 	LatestBuild struct {
-		Status   string `json:"status"`
-		Deadline string `json:"deadline"`
+		Status      string    `json:"status"`
+		Deadline    time.Time `json:"deadline"`     // 停止予定。ゼロなら autostop なし。人の操作やアクセスでも動く
+		MaxDeadline time.Time `json:"max_deadline"` // テンプレートが許す停止予定の上限。ゼロなら上限なし
 	} `json:"latest_build"`
+}
+
+// Extension は停止予定を now+ttl 以降にするために coder schedule extend へ渡す時間を返す。
+// 今の停止予定で足りるなら 0（他の人が延ばした予定を縮めない）。上限で切ったときは capped が true。
+func (w Workspace) Extension(now time.Time, ttl time.Duration) (d time.Duration, capped bool) {
+	b := w.LatestBuild
+	if b.Deadline.IsZero() {
+		return 0, false
+	}
+	want := now.Add(ttl)
+	if !b.MaxDeadline.IsZero() && want.After(b.MaxDeadline) {
+		want, capped = b.MaxDeadline, true
+	}
+	if !b.Deadline.Before(want) {
+		return 0, capped
+	}
+	// extend は分単位で、30 分未満を受け付けない
+	return max(want.Sub(now).Truncate(time.Minute), 30*time.Minute), capped
+}
+
+// Find は名前で workspace を探す。
+func Find(ws []Workspace, name string) (Workspace, bool) {
+	for _, w := range ws {
+		if w.Name == name {
+			return w, true
+		}
+	}
+	return Workspace{}, false
 }
 
 // Quote は s を POSIX シェルの 1 語にする。
