@@ -10,16 +10,18 @@ description: "mujin で Coder workspace にジョブを振り分け、結果を�
 ## 手順
 
 1. `mujin ls --json` で workspace の状態と、割り当て中のジョブを見る。
-2. 投げ先を決めて `mujin dispatch <ws> "<prompt>" --cwd <リポジトリのパス>` を実行する。出力がジョブ ID（例: `J12`）。
+2. `mujin places <ws>` で worker の作業場所を見る。人間が書き足した指示があれば従って `--cwd` を選ぶ。
+3. 投げ先を決めて `mujin dispatch <ws> "<prompt>" --cwd <リポジトリのパス>` を実行する。出力がジョブ ID（例: `J12`）。
+   - モデルを人間に指定されたら `--model <名前>` を付ける。指定がなければ付けない。
    - `--cwd` は worker の claude が信頼済みのフォルダにする。未信頼だと起動時の確認で止まる。
    - prompt は worker が単独で完結できるように書く。worker は会話の文脈を知らない。
-3. `mujin wait --any` を Bash の `run_in_background` で実行する。何度も状態を見に行かない。終わると `<ID> <state>` を出力する。
-4. 状態に応じて対応する。
-   - `done`: `mujin read <ID>` で要約を読む。コードは worker のブランチ `mujin/<ID>` にある（push はされていない）。
+4. `mujin wait --any` を Bash の `run_in_background` で実行する。何度も状態を見に行かない。終わると `<ID> <state>` を出力する。
+5. 状態に応じて対応する。
+   - `done`: `mujin read <ID>` で要約を読む。コードは worker が付けたブランチにあり、名前は要約に書かれている（push はされていない）。
    - `blocked`: worker が承認を求めている。自分で承認せず、人間に「<ws> の <ID> が承認を求めています」と報告する。`mujin attach <ID>` で人間が入れる。
    - `check`: 結果を書かずに止まった可能性がある。`mujin read <ID>` で画面を確認して人間に報告する。
    - `stopped`: workspace が止まっている。`mujin up <ws>` で起動してから状態を見直す。
-5. まだ動いているジョブがあれば 3 に戻る。
+6. まだ動いているジョブがあれば 4 に戻る。
 
 ## ルール
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -24,7 +25,7 @@ type jobState struct {
 
 // dispatchScript は worker 側で mujin 用の herdr workspace に tab を作り、claude を起動して prompt を送る。
 // 失敗したら作った pane を閉じる。残すと agent 名が埋まったままになり、次のジョブが起動できない。
-// %[1]s=cwd %[2]s=agent 名 %[3]s=prompt（いずれもクオート済み）
+// %[1]s=cwd %[2]s=agent 名 %[3]s=prompt（いずれもクオート済み） %[4]s=claude に渡す引数（" -- --model 'x'" か空）
 // 関数の中から exit すると、ログインシェルの環境によっては bash が pop_var_context の警告を出すので、その場で exit する。
 const dispatchScript = `set -euo pipefail
 command -v jq >/dev/null || { echo "worker に jq がありません" >&2; exit 1; }
@@ -41,7 +42,7 @@ else
 fi
 trap '[ $? -eq 0 ] || herdr pane close "$p" >/dev/null 2>&1 || true' EXIT
 sleep 2 # shell のプロンプトが出るのを待つ。agent start は対話プロンプトの pane にしか起動できない
-if ! err=$(herdr agent start %[2]s --kind claude --pane "$p" --timeout 60000 2>&1 >/dev/null); then
+if ! err=$(herdr agent start %[2]s --kind claude --pane "$p" --timeout 60000%[4]s 2>&1 >/dev/null); then
   case "$err" in
     *agent_not_ready*) echo "claude が起動時の確認で止まりました。worker で $cwd を一度 claude で開いて信頼してください" >&2 ;;
     *) echo "$err" >&2 ;;
@@ -104,7 +105,7 @@ func jobCommands() []*cobra.Command {
 	}
 	ls.Flags().BoolVar(&asJSON, "json", false, "JSON で出力する")
 
-	var cwd string
+	var cwd, model string
 	var extend time.Duration
 	dispatch := &cobra.Command{
 		Use:   "dispatch <ws> <prompt>",
@@ -137,15 +138,20 @@ func jobCommands() []*cobra.Command {
 			if err := checkDeadline(ws, name, extend); err != nil {
 				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
-			j := jobs.Job{WS: name, Cwd: cwd, CreatedAt: time.Now().Format(time.RFC3339), Prompt: prompt}
+			j := jobs.Job{WS: name, Cwd: cwd, Model: model, CreatedAt: time.Now().Format(time.RFC3339), Prompt: prompt}
 			if extend > 0 {
 				j.Extend = extend.String()
 			}
 			if err := jobs.Create(&j); err != nil {
 				return err
 			}
-			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書いてください。コードを変更したらブランチ %[2]s に commit してください（push はしない）。\n\n%[3]s", j.ID, j.Branch, prompt)
-			if _, err := coder.Output(name, fmt.Sprintf(dispatchScript, coder.Quote(cwd), j.Agent, coder.Quote(full))); err != nil {
+			// ブランチ名は worker に決めさせる。リポジトリの慣習を見られるのは worker で、mujin/J1 のような連番は司令塔をまたぐと衝突する
+			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書いてください。コードを変更したら、このリポジトリのブランチ名の慣習（git branch -a で確かめる）に沿い、内容が分かって既存のブランチと重ならない名前のブランチを作って commit してください（push はしない）。そのブランチ名を ~/.mujin/out/%[1]s.branch に 1 行で書き、要約にも書いてください。\n\n%[2]s", j.ID, prompt)
+			var agentArgs string
+			if model != "" {
+				agentArgs = " -- --model " + coder.Quote(model)
+			}
+			if _, err := coder.Output(name, fmt.Sprintf(dispatchScript, coder.Quote(cwd), j.Agent, coder.Quote(full), agentArgs)); err != nil {
 				_ = jobs.Remove(j.ID)
 				return fmt.Errorf("ジョブを開始できませんでした: %w", err)
 			}
@@ -155,6 +161,7 @@ func jobCommands() []*cobra.Command {
 	}
 	dispatch.Flags().StringVar(&cwd, "cwd", "", "worker で claude を起動するディレクトリ（claude で信頼済みのもの）")
 	dispatch.Flags().DurationVar(&extend, "extend", 0, "停止予定が今からこの時間より前なら、coder schedule extend でここまで延ばす（既定は延ばさない）")
+	dispatch.Flags().StringVar(&model, "model", "", "worker の claude に渡す --model（sonnet、opus、モデル ID など。既定は worker の設定）")
 	_ = dispatch.MarkFlagRequired("cwd")
 
 	var anyJob bool
@@ -289,6 +296,15 @@ func jobCommands() []*cobra.Command {
 			if to == "" {
 				to = j.Cwd
 			}
+			if j.Branch == "" {
+				out, err := coder.Output(j.WS, fmt.Sprintf("cat ~/.mujin/out/%s.branch 2>/dev/null || true", j.ID))
+				if err != nil {
+					return err
+				}
+				if j.Branch = strings.TrimSpace(out); j.Branch == "" {
+					return fmt.Errorf("%s はブランチを残していません（コードを変更していない可能性があります。mujin read %s で確認してください）", j.ID, j.ID)
+				}
+			}
 			if err := pipe(coder.SSH(j.WS, bundleScript(j.Cwd, j.Branch)), coder.SSH(args[1], fetchScript(to, j.Branch))); err != nil {
 				return err
 			}
@@ -298,7 +314,41 @@ func jobCommands() []*cobra.Command {
 	}
 	fetch.Flags().StringVar(&to, "cwd", "", "渡し先のリポジトリ（既定はジョブの --cwd と同じパス）")
 
-	return []*cobra.Command{ls, dispatch, wait, read, attach, list, fetch}
+	var rescan bool
+	places := &cobra.Command{
+		Use:   "places <ws>",
+		Short: "workspace の作業場所（git リポジトリ）の一覧 md を表示する。なければ調べて作る",
+		Long: `~/.mujin/places/<ws>.md を表示する。なければ worker のホーム以下の git リポジトリを調べて書く。
+この md に各リポジトリの用途や「〜の作業はここで」といった指示を書き足しておくと、司令塔が --cwd を選ぶときに読む。
+--rescan で調べ直して上書きする（書き足した内容は消える）。`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			name := args[0]
+			home, _ := os.UserHomeDir()
+			p := filepath.Join(home, ".mujin", "places", name+".md")
+			if b, err := os.ReadFile(p); err == nil && !rescan {
+				_, err = os.Stdout.Write(b)
+				return err
+			}
+			out, err := coder.Output(name, placesScript)
+			if err != nil {
+				return fmt.Errorf("%s を調べられませんでした: %w", name, err)
+			}
+			md := fmt.Sprintf("# %s の作業場所\n\nmujin dispatch の --cwd の候補。用途や作業の指示を書き足すと司令塔が読む。\n\n%s", name, out)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(p, []byte(md), 0o644); err != nil {
+				return err
+			}
+			fmt.Fprintln(os.Stderr, "保存しました:", p)
+			fmt.Print(md)
+			return nil
+		},
+	}
+	places.Flags().BoolVar(&rescan, "rescan", false, "調べ直して上書きする")
+
+	return []*cobra.Command{ls, dispatch, wait, read, attach, list, fetch, places}
 }
 
 // checkDeadline は Coder から読んだ今の停止予定を確かめる。停止予定は人の操作やアクセスでも動く。
@@ -327,6 +377,13 @@ func checkDeadline(ws []coder.Workspace, name string, extend time.Duration) erro
 	}
 	return nil
 }
+
+// placesScript はホーム以下の git リポジトリを "- ~/path (origin の URL)" の形で出力する。
+// 隠しディレクトリと node_modules は見ない。
+const placesScript = `find ~ -maxdepth 5 \( -name node_modules -o \( -name '.*' ! -name .git \) \) -prune -o -name .git -print 2>/dev/null | sort | while read -r g; do
+  d=${g%/.git}
+  echo "- ~${d#$HOME} ($(git -C "$d" remote get-url origin 2>/dev/null || echo "origin なし"))"
+done`
 
 // bundleScript は dir のリポジトリで branch の bundle を標準出力に書く。
 // 渡し先も origin を fetch している前提で、origin/HEAD との分岐点より前は送らない。

@@ -23,11 +23,12 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin forward [name] [-p 3000 ...]` | ポートを手元に転送する（Ctrl-C で終了） |
 | `mujin status [name]` / `mujin ca [name] [out]` | bootstrap の状態とログ / ルート CA 証明書の取得 |
 | `mujin ls [--json]` | workspace の状態と、割り当て中のジョブ |
-| `mujin dispatch <ws> "prompt" --cwd <dir> [--extend 8h]` | 新しい claude にジョブを投げる。ジョブ ID を出力。停止予定を延ばすのは `--extend` を付けたときだけ |
+| `mujin dispatch <ws> "prompt" --cwd <dir> [--model sonnet] [--extend 8h]` | 新しい claude にジョブを投げる。ジョブ ID を出力。ブランチ名は worker がリポジトリの慣習に合わせて決める。停止予定を延ばすのは `--extend` を付けたときだけ |
 | `mujin wait <job>` / `mujin wait --any` | 終わるか、人間の対応が必要になるまで待つ |
 | `mujin read <job>` / `mujin attach <job>` | 結果を読む / その claude の端末に入る |
 | `mujin jobs [--json]` | ジョブの一覧と状態（`done` `running` `blocked` `check` `stopped`） |
 | `mujin fetch <job> <ws> [--cwd <dir>]` | ジョブのブランチを別の workspace のリポジトリに渡す（GitHub を経由しない） |
+| `mujin places <ws> [--rescan]` | workspace の git リポジトリを調べて `~/.mujin/places/<ws>.md` に書く（あれば表示だけ）。用途や作業場所の指示を書き足すと司令塔が読む |
 | `mujin cp <src> <dst>` | `ws:path` 形式で workspace 間・手元との間を転送する |
 | `mujin --skill` | 司令塔用の SKILL.md を出力する |
 
