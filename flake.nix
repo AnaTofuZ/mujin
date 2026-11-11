@@ -18,6 +18,7 @@
           src = pkgs.lib.cleanSource ./.;
           vendorHash = "sha256-kn3uuOHipeoKk2Dbczj5iUSYUwYUZYrg4XlgLbAFKC4=";
           subPackages = [ "cmd/mujin" ];
+          nativeCheckInputs = [ pkgs.git ];
           ldflags = [ "-s" "-w" ];
           meta = { description = "Coder workspace fleet CLI for Claude Code"; mainProgram = "mujin"; platforms = systems; };
         };

@@ -27,6 +27,7 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin wait <job>` / `mujin wait --any` | 終わるか、人間の対応が必要になるまで待つ |
 | `mujin read <job>` / `mujin attach <job>` | 結果を読む / その claude の端末に入る |
 | `mujin jobs [--json]` | ジョブの一覧と状態（`done` `running` `blocked` `check` `stopped`） |
+| `mujin fetch <job> <ws> [--cwd <dir>]` | ジョブのブランチを別の workspace のリポジトリに渡す（GitHub を経由しない） |
 | `mujin cp <src> <dst>` | `ws:path` 形式で workspace 間・手元との間を転送する |
 | `mujin --skill` | 司令塔用の SKILL.md を出力する |
 

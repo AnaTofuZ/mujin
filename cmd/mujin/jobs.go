@@ -136,7 +136,7 @@ func jobCommands() []*cobra.Command {
 			if err := jobs.Create(&j); err != nil {
 				return err
 			}
-			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書き、コードの変更はブランチ %[2]s に push してください。\n\n%[3]s", j.ID, j.Branch, prompt)
+			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書いてください。コードを変更したらブランチ %[2]s に commit してください（push はしない）。\n\n%[3]s", j.ID, j.Branch, prompt)
 			if _, err := coder.Output(name, fmt.Sprintf(dispatchScript, coder.Quote(cwd), j.Agent, coder.Quote(full))); err != nil {
 				_ = jobs.Remove(j.ID)
 				return fmt.Errorf("ジョブを開始できませんでした: %w", err)
@@ -266,7 +266,53 @@ func jobCommands() []*cobra.Command {
 	}
 	list.Flags().BoolVar(&asJSON, "json", false, "JSON で出力する")
 
-	return []*cobra.Command{ls, dispatch, wait, read, attach, list}
+	var to string
+	fetch := &cobra.Command{
+		Use:   "fetch <job> <ws>",
+		Short: "ジョブのブランチを別の workspace のリポジトリに渡す（GitHub を経由しない）",
+		Long: `ジョブの workspace で git bundle を作り、司令塔を経由して渡し先のリポジトリに fetch する。
+送るのは origin/HEAD から分かれた後のコミットだけ。渡し先のブランチは上書きする。`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			j, err := jobs.Get(args[0])
+			if err != nil {
+				return err
+			}
+			if to == "" {
+				to = j.Cwd
+			}
+			if err := pipe(coder.SSH(j.WS, bundleScript(j.Cwd, j.Branch)), coder.SSH(args[1], fetchScript(to, j.Branch))); err != nil {
+				return err
+			}
+			fmt.Printf("%s:%s のブランチ %s を %s:%s に渡しました\n", j.WS, j.Cwd, j.Branch, args[1], to)
+			return nil
+		},
+	}
+	fetch.Flags().StringVar(&to, "cwd", "", "渡し先のリポジトリ（既定はジョブの --cwd と同じパス）")
+
+	return []*cobra.Command{ls, dispatch, wait, read, attach, list, fetch}
+}
+
+// bundleScript は dir のリポジトリで branch の bundle を標準出力に書く。
+// 渡し先も origin を fetch している前提で、origin/HEAD との分岐点より前は送らない。
+func bundleScript(dir, branch string) string {
+	return fmt.Sprintf(`set -euo pipefail
+d=%s; cd "${d/#\~/$HOME}"
+if base=$(git merge-base origin/HEAD %[2]s 2>/dev/null); then
+  git bundle create -q - %[2]s "^$base"
+else
+  git bundle create -q - %[2]s
+fi`, coder.Quote(dir), coder.Quote(branch))
+}
+
+// fetchScript は標準入力の bundle を dir のリポジトリの branch に取り込む。
+func fetchScript(dir, branch string) string {
+	return fmt.Sprintf(`set -euo pipefail
+d=%s; cd "${d/#\~/$HOME}"
+f=$(mktemp); trap 'rm -f "$f"' EXIT
+cat > "$f"
+git fetch -q "$f" %s || { echo "取り込めませんでした。前提のコミットがないと言われたら、渡し先で git fetch origin してから再実行してください" >&2; exit 1; }`,
+		coder.Quote(dir), coder.Quote("+"+branch+":"+branch))
 }
 
 // states は各ジョブの状態を求める。worker への問い合わせは workspace ごとに 1 回で、

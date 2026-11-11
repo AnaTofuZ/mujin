@@ -72,7 +72,7 @@ mujin dispatch ws-a "認証まわりのバグを直して。テストも通し�
 1. ws-a が止まっていれば起動する
 2. 停止期限を `--ttl`（既定 8h）だけ延ばす
 3. worker の herdr に `mujin` という workspace を作り、新しい tab で `claude` を起動する（agent 名は `mujin-j1`）
-4. prompt の先頭に「要約を `~/.mujin/out/J1.md` に書き、コードはブランチ `mujin/J1` に push する」という指示を付けて送る
+4. prompt の先頭に「要約を `~/.mujin/out/J1.md` に書き、コードの変更はブランチ `mujin/J1` に commit する（push はしない）」という指示を付けて送る
 
 人間が使っている既存の Claude のセッションには触りません。1 つの workspace で同時に動かすジョブは 1 つまでです。
 
@@ -91,7 +91,7 @@ mujin wait --any          # 実行中のどれかが終わるか、対応が必�
 mujin read J1             # 要約を表示する
 ```
 
-結果は完了を検知した時点で `~/.mujin/jobs/J1.out.md` にコピーされるので、ws-a が止まった後でも読めます。コードはブランチ `mujin/J1` にあります。
+結果は完了を検知した時点で `~/.mujin/jobs/J1.out.md` にコピーされるので、ws-a が止まった後でも読めます。コードは ws-a のリポジトリのブランチ `mujin/J1` にあります（GitHub には push されません）。
 
 状態の一覧:
 
@@ -111,11 +111,14 @@ mujin jobs
 
 ## 6. レビューを別の workspace に頼む
 
-コードの受け渡しは git のブランチで行います。
+コードは GitHub を経由せず、`mujin fetch` で司令塔を経由して渡します。ws-a で `git bundle` を作り、ws-b のリポジトリに取り込みます。送るのは `origin/HEAD` から分かれた後のコミットだけなので、ブランチを push して CI が走ることもありません。
 
 ```sh
+mujin fetch J1 ws-b       # ws-b の同じパスのリポジトリに mujin/J1 を取り込む（別のパスなら --cwd）
 mujin dispatch ws-b "ブランチ mujin/J1 をレビューして、問題点を要約に書いて。" --cwd ~/src/app
 ```
+
+「前提のコミットがない」と言われたら、ws-b で `git fetch origin` してからやり直してください。PR にしたくなったら、人間が ws-a で `git push` します。
 
 ## 7. ファイルを渡す
 
