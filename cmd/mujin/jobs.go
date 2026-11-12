@@ -146,7 +146,7 @@ func jobCommands() []*cobra.Command {
 				return err
 			}
 			// ブランチ名は worker に決めさせる。リポジトリの慣習を見られるのは worker で、mujin/J1 のような連番は司令塔をまたぐと衝突する
-			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書いてください。コードを変更したら、このリポジトリのブランチ名の慣習（git branch -a で確かめる）に沿い、内容が分かって既存のブランチと重ならない名前のブランチを作って commit してください（push はしない）。そのブランチ名を ~/.mujin/out/%[1]s.branch に 1 行で書き、要約にも書いてください。\n\n%[2]s", j.ID, prompt)
+			full := fmt.Sprintf("あなたは mujin のジョブ %[1]s です。終わったら要約を ~/.mujin/out/%[1]s.md に書いてください。コードを変更したら、このリポジトリのブランチ名の慣習（git branch -a で確かめる）に沿い、内容が分かって既存のブランチと重ならない名前のブランチを作って commit してください（push はしない）。そのブランチ名を ~/.mujin/out/%[1]s.branch に 1 行で書き、要約にも書いてください。PR に画像を載せるときは gh pr edit <PR> --attach <file> で添付し、画像をブランチに push しないでください。\n\n%[2]s", j.ID, prompt)
 			var agentArgs string
 			if model != "" {
 				agentArgs = " -- --model " + coder.Quote(model)

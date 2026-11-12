@@ -38,6 +38,7 @@ description: "mujin で Coder workspace にジョブを振り分け、結果を�
 - 1 つの workspace で同時に動かすジョブは 1 つまで。`dispatch` も拒否する。
 - mujin が作った agent（`mujin-j<N>`）以外の Claude セッションには触らない。そこは人間が使っている。
 - workspace 間のコードの受け渡しは `mujin fetch <ID> <ws>` で行う。GitHub に push しない（CI が走る）。push は人間が PR を出すと決めたときだけ。
+- PR に画像（スクリーンショットなど）を載せるときは `gh pr edit <PR> --attach <file>` で添付する。本文に `![説明](./file.png)` と書いておくと、添付した画像の URL に書き換わる。画像をブランチに push して参照しない。
 - `mujin cp <ws:path> <ws:dir>` は git で扱わないもの（DB のダンプ、ビルド成果物、ログ、生成データ）に使う。dst はディレクトリ。
 - 機密ファイル（`.env`、鍵、トークン）は、人間の明示的な指示がない限り送らない。
 - workspace の作成（`mujin create`）や削除は、人間に確認してから行う。
