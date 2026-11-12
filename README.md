@@ -26,6 +26,7 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin dispatch <ws> "prompt" --cwd <dir> [--model sonnet] [--extend 8h]` | 新しい claude にジョブを投げる。ジョブ ID を出力。ブランチ名は worker がリポジトリの慣習に合わせて決める。停止予定を延ばすのは `--extend` を付けたときだけ |
 | `mujin wait <job>` / `mujin wait --any` | 終わるか、人間の対応が必要になるまで待つ |
 | `mujin read <job>` / `mujin attach <job>` | 結果を読む / その claude の端末に入る |
+| `mujin send <job> "message"` | ジョブの claude に追加の指示を送る（作業中でも、終わった後でも）。新しいジョブにはせず、ジョブは running に戻る |
 | `mujin jobs [--json]` | ジョブの一覧と状態（`done` `running` `blocked` `check` `stopped`） |
 | `mujin fetch <job> <ws> [--cwd <dir>]` | ジョブのブランチを別の workspace のリポジトリに渡す（GitHub を経由しない） |
 | `mujin places <ws> [--rescan]` | workspace の git リポジトリを調べて `~/.mujin/places/<ws>.md` に書く（あれば表示だけ）。用途や作業場所の指示を書き足すと司令塔が読む |
