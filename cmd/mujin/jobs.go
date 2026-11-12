@@ -237,6 +237,34 @@ func jobCommands() []*cobra.Command {
 		},
 	}
 
+	send := &cobra.Command{
+		Use:   "send <job> <message>",
+		Short: "ジョブの claude に追加の指示を送る（新しいジョブにせず、同じ会話で続けさせる）",
+		Long: `作業中でも送れる（claude は今の作業に割り込ませて受け取る）。終わったジョブにも、その claude が残っていれば送れる。
+送ると結果を回収し直すため、ジョブは running に戻る。承認待ち（blocked）のジョブには送れない。`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(_ *cobra.Command, args []string) error {
+			j, err := jobs.Get(args[0])
+			if err != nil {
+				return err
+			}
+			msg := fmt.Sprintf("（ジョブ %[1]s への追加の指示です。終わったら ~/.mujin/out/%[1]s.md の要約を書き直してください。ブランチを変えたら ~/.mujin/out/%[1]s.branch も）\n\n%[2]s", j.ID, args[1])
+			// 古い要約が残っていると、送った直後に done と判定してしまうので消してから送る
+			script := fmt.Sprintf(`set -euo pipefail
+herdr agent get %[1]s >/dev/null 2>&1 || { echo "agent %[1]s が worker にいません。新しいジョブとして dispatch してください" >&2; exit 1; }
+rm -f ~/.mujin/out/%[2]s.md
+herdr agent prompt %[1]s %[3]s --wait --until working --until blocked --timeout 60000 >/dev/null`, j.Agent, j.ID, coder.Quote(msg))
+			if _, err := coder.Output(j.WS, script); err != nil {
+				return fmt.Errorf("%s に送れませんでした: %w", j.ID, err)
+			}
+			if err := os.Remove(jobs.OutPath(j.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			fmt.Println(j.ID)
+			return nil
+		},
+	}
+
 	attach := &cobra.Command{
 		Use:   "attach <job>",
 		Short: "ジョブの claude の端末に入る",
@@ -348,7 +376,7 @@ func jobCommands() []*cobra.Command {
 	}
 	places.Flags().BoolVar(&rescan, "rescan", false, "調べ直して上書きする")
 
-	return []*cobra.Command{ls, dispatch, wait, read, attach, list, fetch, places}
+	return []*cobra.Command{ls, dispatch, wait, read, send, attach, list, fetch, places}
 }
 
 // checkDeadline は Coder から読んだ今の停止予定を確かめる。停止予定は人の操作やアクセスでも動く。

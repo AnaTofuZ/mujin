@@ -23,6 +23,16 @@ description: "mujin で Coder workspace にジョブを振り分け、結果を�
    - `stopped`: workspace が止まっている。`mujin up <ws>` で起動してから状態を見直す。
 6. まだ動いているジョブがあれば 4 に戻る。
 
+## 軌道修正と追加の指示
+
+人間の指示が、既存のジョブと同じ作業の続き（方針の修正、やり直し、続きの作業、レビューへの対応）なら、新しく dispatch せずに `mujin send <ID> "<message>"` で同じ claude に送る。worker は会話の文脈を持っているので、message は差分だけでよい。
+
+- どのジョブか特定できないとき（同じ workspace に複数ある、話題が曖昧）は人間に確認する。
+- 別の作業、別のリポジトリ、文脈を引き継ぐと邪魔になる作業は dispatch する。
+- `send` は作業中（running）でも、終わった後（done、check）でも使える。送った後は 4 と同じく `mujin wait` で待つ。
+- `blocked` のジョブには送れない。人間に承認を任せる。
+- `agent ... が worker にいません` と言われたら、その claude は閉じられている。前のジョブの要約を添えて dispatch する。
+
 ## ルール
 
 - 1 つの workspace で同時に動かすジョブは 1 つまで。`dispatch` も拒否する。
