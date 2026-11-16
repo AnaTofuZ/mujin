@@ -23,6 +23,7 @@ type Config struct {
 		Args    []string `yaml:"args"`    // coder create に足す引数（--template など）
 		Param   string   `yaml:"param"`   // create の第 2 引数で値を渡すパラメータ名
 		Choices []string `yaml:"choices"` // Param を対話で尋ねるときの選択肢
+		Setup   string   `yaml:"setup"`   // 作成直後（bootstrap の前）に workspace で実行するシェル
 	} `yaml:"create"`
 	Bootstrap struct {
 		When   string `yaml:"when"`   // 成功したときだけ bootstrap を待つシェルの条件
@@ -96,6 +97,10 @@ func wsCommands() []*cobra.Command {
 			}
 			if err := waitAgent(name); err != nil {
 				return err
+			}
+			// 失敗しても workspace は使えるので、警告に留めて bootstrap を待つ。
+			if err := setup(cfg, name); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
 			}
 			if err := waitBootstrap(cfg, name); err != nil {
 				return err
@@ -266,6 +271,20 @@ func waitAgent(name string) error {
 		time.Sleep(5 * time.Second)
 	}
 	return fmt.Errorf("エージェントに接続できません（coder show %s で状態を確認してください）", name)
+}
+
+// setup は config の create.setup を workspace で実行する。
+func setup(cfg Config, name string) error {
+	if cfg.Create.Setup == "" {
+		return nil
+	}
+	fmt.Fprintln(os.Stderr, "create.setup を実行しています...")
+	cmd := coder.SSH(name, cfg.Create.Setup)
+	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("create.setup が失敗しました: %w", err)
+	}
+	return nil
 }
 
 func waitBootstrap(cfg Config, name string) error {
