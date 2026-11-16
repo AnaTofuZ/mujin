@@ -48,6 +48,8 @@ create:
   args: [--template, my-template, --parameter, arch=arm64]  # coder create に足す引数
   param: stack                     # create の第 2 引数で渡すパラメータ
   choices: [app, none]             # 省略時に対話で選ぶ選択肢
+  setup: |                         # 作成直後に workspace で実行する（bootstrap の前）
+    gh extension install owner/gh-ext
 bootstrap:
   when: '[ "$APP_STACK" != none ]' # 成功したときだけ bootstrap を待つ
   status: ~/src/.bootstrap-status  # 最終行が "<時刻> done:..." か "<時刻> failed:..."
