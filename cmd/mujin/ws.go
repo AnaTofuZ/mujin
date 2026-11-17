@@ -3,6 +3,7 @@ package main
 // workspace の作成・起動・転送。環境固有の値（テンプレート、bootstrap のパスなど）は config.yaml から読む。
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -217,7 +218,36 @@ func wsCommands() []*cobra.Command {
 			return nil
 		},
 	}
-	return []*cobra.Command{create, up, fw, status, ca}
+	setupCmd := &cobra.Command{
+		Use:   "setup [name...]",
+		Short: "config の create.setup を既存の workspace で実行する（同じ内容を実行済みなら飛ばす）",
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			if cfg.Create.Setup == "" {
+				return errors.New("config の create.setup が設定されていません")
+			}
+			if len(args) == 0 {
+				name, err := pickWorkspace(args)
+				if err != nil {
+					return err
+				}
+				args = []string{name}
+			}
+			// 1 台が失敗しても残りには流す
+			var errs []error
+			for _, name := range args {
+				fmt.Fprintln(os.Stderr, "==", name)
+				if err := setup(cfg, name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	return []*cobra.Command{create, up, fw, status, ca, setupCmd}
 }
 
 func arg(args []string, i int) string {
@@ -279,12 +309,24 @@ func setup(cfg Config, name string) error {
 		return nil
 	}
 	fmt.Fprintln(os.Stderr, "create.setup を実行しています...")
-	cmd := coder.SSH(name, cfg.Create.Setup)
+	cmd := coder.SSH(name, setupScript(cfg.Create.Setup))
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("create.setup が失敗しました: %w", err)
 	}
 	return nil
+}
+
+// setupScript は、成功した setup の内容のハッシュを workspace に残し、同じ内容なら実行しないスクリプトにする。
+// setup を書き換えると、次の実行で流し直す。
+func setupScript(setup string) string {
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(setup)))
+	return fmt.Sprintf(`m="$HOME/.mujin/setup.sha256"
+if [ "$(cat "$m" 2>/dev/null)" = %[1]s ]; then echo "create.setup は実行済みです（$m）" >&2; exit 0; fi
+(
+%[2]s
+) || exit
+mkdir -p "$HOME/.mujin" && echo %[1]s >"$m"`, sum, setup)
 }
 
 func waitBootstrap(cfg Config, name string) error {
