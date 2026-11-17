@@ -19,6 +19,7 @@ nix profile install github:AnaTofuZ/mujin
 | コマンド | やること |
 | --- | --- |
 | `mujin create [name] [value]` | workspace を作成し、bootstrap の完了まで待つ。`--forward` で続けて転送 |
+| `mujin setup [name...]` | config の `create.setup` を既存の workspace で実行する。同じ内容を実行済みの workspace では飛ばす |
 | `mujin up [name]` | 停止中なら起動して待つ。`--forward` で続けて転送 |
 | `mujin forward [name] [-p 3000 ...]` | ポートを手元に転送する（Ctrl-C で終了） |
 | `mujin status [name]` / `mujin ca [name] [out]` | bootstrap の状態とログ / ルート CA 証明書の取得 |
@@ -48,7 +49,7 @@ create:
   args: [--template, my-template, --parameter, arch=arm64]  # coder create に足す引数
   param: stack                     # create の第 2 引数で渡すパラメータ
   choices: [app, none]             # 省略時に対話で選ぶ選択肢
-  setup: |                         # 作成直後に workspace で実行する（bootstrap の前）
+  setup: |                         # 作成直後に workspace で実行する（bootstrap の前）。既存には mujin setup
     gh extension install owner/gh-ext
 bootstrap:
   when: '[ "$APP_STACK" != none ]' # 成功したときだけ bootstrap を待つ
