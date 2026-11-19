@@ -42,4 +42,5 @@ description: "mujin で Coder workspace にジョブを振り分け、結果を�
 - `mujin cp <ws:path> <ws:dir>` は git で扱わないもの（DB のダンプ、ビルド成果物、ログ、生成データ）に使う。dst はディレクトリ。
 - 機密ファイル（`.env`、鍵、トークン）は、人間の明示的な指示がない限り送らない。
 - workspace の作成（`mujin create`）、削除（`mujin rm`）、作り直し（`mujin recreate`）は、人間に確認してから行う。確認が取れたら `--yes` を付けて実行する。中のデータは消える。
+- workspace の停止（`mujin stop`）と再起動（`mujin restart`）も、人間に確認してから `--yes` を付けて行う。中で動いているジョブは止まる。
 - 停止予定の延長（`dispatch --extend`）は、人間に頼まれたときだけ行う。`dispatch` が停止予定の警告を出したら人間に伝える。

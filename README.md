@@ -6,7 +6,7 @@ Coder workspace と、その中の [herdr](https://herdr.dev) を束ねて、複
 - `mujin`（引数なし）で、司令塔用の skill を読み込んだ `claude` が起動する
 - ジョブは worker 側の herdr の中で動くので、司令塔が止まっても続く
 
-前提: 手元に `coder`（`coder login` 済み）。worker に `herdr` 0.9 系、`jq`、ログイン済みの `claude`。
+前提: 手元に `coder`（`coder login` 済み）。worker に `herdr` 0.9 系、`jq`、`claude`。claude のログインは `mujin login` でまとめてできる。
 
 ```sh
 go install github.com/AnaTofuZ/mujin/cmd/mujin@latest
@@ -21,6 +21,9 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin create [name] [value]` | workspace を作成し、bootstrap の完了まで待つ。手元に herdr があれば、worker に同じ版の herdr を入れて `herdr machine add` で登録する。`--forward` で続けて転送 |
 | `mujin rm <name...> [-y]` | workspace を削除し、手元の herdr の machine 登録も ID 指定で消す |
 | `mujin recreate <name...> \| --all [-y]` | 今のビルドパラメータを読んでから workspace を削除し、同じ名前とパラメータで作り直す。テンプレートは最新版になる。herdr の登録も作り直す |
+| `mujin stop <name...> [-y]` | workspace を停止する。中で動いているジョブも止まる |
+| `mujin restart <name...> [-y]` | workspace を再起動し、エージェントの接続と bootstrap を待つ。中で動いているジョブは止まる |
+| `mujin login [name...] \| --all` | ログインしていない workspace だけ、端末を繋いで `claude auth login` を実行し、表示された認証の URL を手元のブラウザで開く（手元の claude のメールアドレスを入れておく）。`create` と `recreate` も、端末から実行したときは最後にこれを行う |
 | `mujin setup [name...]` | config の `create.setup` を既存の workspace で実行する。同じ内容を実行済みの workspace では飛ばす |
 | `mujin up [name]` | 停止中なら起動して待つ。`--forward` で続けて転送 |
 | `mujin forward [name] [-p 3000 ...]` | ポートを手元に転送する（Ctrl-C で終了） |
