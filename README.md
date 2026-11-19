@@ -21,8 +21,8 @@ nix profile install github:AnaTofuZ/mujin
 | `mujin create [name] [value]` | workspace を作成し、bootstrap の完了まで待つ。手元に herdr があれば、worker に同じ版の herdr を入れて `herdr machine add` で登録する。`--forward` で続けて転送 |
 | `mujin rm <name...> [-y]` | workspace を削除し、手元の herdr の machine 登録も ID 指定で消す |
 | `mujin recreate <name...> \| --all [-y]` | 今のビルドパラメータを読んでから workspace を削除し、同じ名前とパラメータで作り直す。テンプレートは最新版になる。herdr の登録も作り直す |
-| `mujin stop <name...> [-y]` | workspace を停止する。中で動いているジョブも止まる |
-| `mujin restart <name...> [-y]` | workspace を再起動し、エージェントの接続と bootstrap を待つ。中で動いているジョブは止まる |
+| `mujin stop <name...> \| --all [-y]` | workspace を停止する。`--all` は動いているものすべて。中で動いているジョブも止まる |
+| `mujin restart <name...> \| --all [-y]` | workspace を再起動し（`--all` は動いているものすべて）、エージェントの接続と bootstrap を待つ。中で動いているジョブは止まる |
 | `mujin login [name...] \| --all` | ログインしていない workspace だけ、端末を繋いで `claude auth login` を実行し、表示された認証の URL を手元のブラウザで開く（手元の claude のメールアドレスを入れておく）。`create` と `recreate` も、端末から実行したときは最後にこれを行う |
 | `mujin setup [name...]` | config の `create.setup` を既存の workspace で実行する。同じ内容を実行済みの workspace では飛ばす |
 | `mujin up [name]` | 停止中なら起動して待つ。`--forward` で続けて転送 |
