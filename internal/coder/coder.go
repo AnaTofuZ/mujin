@@ -1,9 +1,10 @@
-// Package coder は coder CLI を呼び出す。Coder の API は直接叩かない。
+// Package coder は coder CLI を呼び出す。Coder の API は CLI で取れないもの（ビルドパラメータ）だけ直接叩く。
 package coder
 
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,8 +12,10 @@ import (
 )
 
 type Workspace struct {
-	Name        string `json:"name"`
-	LatestBuild struct {
+	Name         string `json:"name"`
+	TemplateName string `json:"template_name"`
+	LatestBuild  struct {
+		ID          string    `json:"id"`
 		Status      string    `json:"status"`
 		Deadline    time.Time `json:"deadline"`     // 停止予定。ゼロなら autostop なし。人の操作やアクセスでも動く
 		MaxDeadline time.Time `json:"max_deadline"` // テンプレートが許す停止予定の上限。ゼロなら上限なし
@@ -79,4 +82,42 @@ func List() ([]Workspace, error) {
 	}
 	var ws []Workspace
 	return ws, json.Unmarshal(out, &ws)
+}
+
+type Parameter struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// Parameters は workspace の最新ビルドのパラメータを返す。coder CLI では読めないので、CLI のトークンで API を叩く。
+func Parameters(w Workspace) ([]Parameter, error) {
+	out, err := exec.Command("coder", "whoami", "-o", "json").Output()
+	if err != nil {
+		return nil, fmt.Errorf("coder whoami に失敗しました: %w", err)
+	}
+	var me []struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(out, &me); err != nil || len(me) == 0 {
+		return nil, fmt.Errorf("coder whoami の出力を読めません: %v", err)
+	}
+	token, err := exec.Command("coder", "login", "token").Output()
+	if err != nil {
+		return nil, fmt.Errorf("coder login token に失敗しました: %w", err)
+	}
+	req, err := http.NewRequest("GET", strings.TrimRight(me[0].URL, "/")+"/api/v2/workspacebuilds/"+w.LatestBuild.ID+"/parameters", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Coder-Session-Token", strings.TrimSpace(string(token)))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s のパラメータを読めません: %s", w.Name, res.Status)
+	}
+	var ps []Parameter
+	return ps, json.NewDecoder(res.Body).Decode(&ps)
 }

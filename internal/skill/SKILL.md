@@ -41,5 +41,5 @@ description: "mujin で Coder workspace にジョブを振り分け、結果を�
 - PR に画像（スクリーンショットなど）を載せるときは `gh pr edit <PR> --attach <file>` で添付する。本文に `![説明](./file.png)` と書いておくと、添付した画像の URL に書き換わる。画像をブランチに push して参照しない。
 - `mujin cp <ws:path> <ws:dir>` は git で扱わないもの（DB のダンプ、ビルド成果物、ログ、生成データ）に使う。dst はディレクトリ。
 - 機密ファイル（`.env`、鍵、トークン）は、人間の明示的な指示がない限り送らない。
-- workspace の作成（`mujin create`）や削除は、人間に確認してから行う。
+- workspace の作成（`mujin create`）、削除（`mujin rm`）、作り直し（`mujin recreate`）は、人間に確認してから行う。確認が取れたら `--yes` を付けて実行する。中のデータは消える。
 - 停止予定の延長（`dispatch --extend`）は、人間に頼まれたときだけ行う。`dispatch` が停止予定の警告を出したら人間に伝える。

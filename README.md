@@ -18,7 +18,9 @@ nix profile install github:AnaTofuZ/mujin
 
 | コマンド | やること |
 | --- | --- |
-| `mujin create [name] [value]` | workspace を作成し、bootstrap の完了まで待つ。`--forward` で続けて転送 |
+| `mujin create [name] [value]` | workspace を作成し、bootstrap の完了まで待つ。手元に herdr があれば、worker に同じ版の herdr を入れて `herdr machine add` で登録する。`--forward` で続けて転送 |
+| `mujin rm <name...> [-y]` | workspace を削除し、手元の herdr の machine 登録も ID 指定で消す |
+| `mujin recreate <name...> \| --all [-y]` | 今のビルドパラメータを読んでから workspace を削除し、同じ名前とパラメータで作り直す。テンプレートは最新版になる。herdr の登録も作り直す |
 | `mujin setup [name...]` | config の `create.setup` を既存の workspace で実行する。同じ内容を実行済みの workspace では飛ばす |
 | `mujin up [name]` | 停止中なら起動して待つ。`--forward` で続けて転送 |
 | `mujin forward [name] [-p 3000 ...]` | ポートを手元に転送する（Ctrl-C で終了） |
