@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -61,7 +62,7 @@ func wsCommands() []*cobra.Command {
 	var fwd bool
 	create := &cobra.Command{
 		Use:   "create [name] [value]",
-		Short: "workspace を作成し、bootstrap の完了まで待つ（value は config の create.param の値）",
+		Short: "workspace を作成し、bootstrap の完了まで待って手元の herdr に登録する（value は config の create.param の値）",
 		Args:  cobra.MaximumNArgs(2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
@@ -96,16 +97,10 @@ func wsCommands() []*cobra.Command {
 			if err := coder.Run(append(cargs, "--yes")...); err != nil {
 				return err
 			}
-			if err := waitAgent(name); err != nil {
+			if err := provision(cfg, name); err != nil {
 				return err
 			}
-			// 失敗しても workspace は使えるので、警告に留めて bootstrap を待つ。
-			if err := setup(cfg, name); err != nil {
-				fmt.Fprintln(os.Stderr, "warning:", err)
-			}
-			if err := waitBootstrap(cfg, name); err != nil {
-				return err
-			}
+			herdrAdd(name)
 			if fwd {
 				return forward(cfg, name, nil)
 			}
@@ -247,7 +242,211 @@ func wsCommands() []*cobra.Command {
 			return errors.Join(errs...)
 		},
 	}
-	return []*cobra.Command{create, up, fw, status, ca, setupCmd}
+	var yes bool
+	rm := &cobra.Command{
+		Use:   "rm <name...>",
+		Short: "workspace を削除し、手元の herdr の machine 登録も消す",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := confirm("削除", args, yes); err != nil {
+				return err
+			}
+			var errs []error
+			for _, name := range args {
+				if err := coder.Run("delete", name, "--yes"); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+					continue
+				}
+				if err := herdrRemove(name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	rm.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに削除する")
+
+	var all bool
+	recreate := &cobra.Command{
+		Use:   "recreate [name...] | recreate --all",
+		Short: "workspace を削除し、同じ名前・同じパラメータで作り直して herdr に登録し直す（テンプレートは最新版になる）",
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			ws, err := coder.List()
+			if err != nil {
+				return err
+			}
+			if all {
+				args = nil
+				for _, w := range ws {
+					args = append(args, w.Name)
+				}
+			}
+			if len(args) == 0 {
+				return errors.New("ワークスペース名か --all を指定してください")
+			}
+			// 消してからでは読めないので、先に全台のパラメータを集めて表示する。
+			cargs := map[string][]string{}
+			for _, name := range args {
+				w, ok := coder.Find(ws, name)
+				if !ok {
+					return fmt.Errorf("ワークスペース %s がありません", name)
+				}
+				ps, err := coder.Parameters(w)
+				if err != nil {
+					return err
+				}
+				cargs[name] = recreateArgs(w, ps)
+				fmt.Fprintln(os.Stderr, "coder", strings.Join(cargs[name], " "))
+			}
+			if err := confirm("削除して作り直し", args, yes); err != nil {
+				return err
+			}
+			// bootstrap は workspace 側で並行に進むので、全台を作ってから順に待つ。
+			var errs []error
+			var made []string
+			for _, name := range args {
+				fmt.Fprintln(os.Stderr, "==", name)
+				if err := coder.Run("delete", name, "--yes"); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+					continue
+				}
+				if err := herdrRemove(name); err != nil {
+					fmt.Fprintln(os.Stderr, "warning:", err)
+				}
+				if err := coder.Run(cargs[name]...); err != nil {
+					errs = append(errs, fmt.Errorf("%s: 削除後の作成に失敗しました（coder %s）: %w", name, strings.Join(cargs[name], " "), err))
+					continue
+				}
+				made = append(made, name)
+			}
+			for _, name := range made {
+				fmt.Fprintln(os.Stderr, "==", name)
+				if err := provision(cfg, name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+					continue
+				}
+				herdrAdd(name)
+			}
+			return errors.Join(errs...)
+		},
+	}
+	recreate.Flags().BoolVar(&all, "all", false, "自分の workspace をすべて作り直す")
+	recreate.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに作り直す")
+
+	return []*cobra.Command{create, up, fw, status, ca, setupCmd, rm, recreate}
+}
+
+// recreateArgs は w と同じテンプレート・パラメータで作る coder create の引数を返す。
+func recreateArgs(w coder.Workspace, ps []coder.Parameter) []string {
+	args := []string{"create", w.Name, "--template", w.TemplateName}
+	for _, p := range ps {
+		args = append(args, "--parameter", p.Name+"="+p.Value)
+	}
+	return append(args, "--yes")
+}
+
+// confirm は消す前に人間に確かめる。対話できないときは --yes を求める。
+func confirm(what string, names []string, yes bool) error {
+	if yes {
+		return nil
+	}
+	if !isTTY() {
+		return fmt.Errorf("対話できない環境です。%s してよければ --yes を付けてください", what)
+	}
+	ok := false
+	if err := survey.AskOne(&survey.Confirm{Message: fmt.Sprintf("%s を%sしますか（中のデータは消えます）", strings.Join(names, ", "), what)}, &ok); err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("中止しました")
+	}
+	return nil
+}
+
+// herdrHost は workspace の SSH ホスト名（coder config-ssh の既定の接尾辞）。
+func herdrHost(name string) string { return name + ".coder" }
+
+// herdrRemove は手元の herdr から name の machine 登録を ID 指定で消す。herdr がなければ何もしない。
+func herdrRemove(name string) error {
+	if _, err := exec.LookPath("herdr"); err != nil {
+		return nil
+	}
+	out, err := exec.Command("herdr", "machine", "list").Output()
+	if err != nil {
+		return fmt.Errorf("herdr machine list に失敗しました: %w", err)
+	}
+	for _, id := range herdrIDs(string(out), herdrHost(name)) {
+		if err := exec.Command("herdr", "machine", "remove", id).Run(); err != nil {
+			return fmt.Errorf("herdr machine remove %s に失敗しました: %w", id, err)
+		}
+		fmt.Fprintf(os.Stderr, "herdr の machine 登録を消しました: %s (%s)\n", herdrHost(name), id)
+	}
+	return nil
+}
+
+// herdrIDs は herdr machine list（ID, ラベル, SSH ターゲット, ... のタブ区切り）から host に向く ID を返す。
+func herdrIDs(list, host string) []string {
+	var ids []string
+	for _, line := range strings.Split(list, "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) >= 3 && f[2] == host {
+			ids = append(ids, f[0])
+		}
+	}
+	return ids
+}
+
+// herdrAdd は workspace に手元と同じ版の herdr を入れてから、手元の herdr に machine として登録する。
+// herdr machine add はリモートに同じ版がないと対話で導入の承認を求めるので、先に入れておく。
+// 手元に herdr がなければ何もしない。失敗したら手で登録するコマンドを案内する。
+func herdrAdd(name string) {
+	if _, err := exec.LookPath("herdr"); err != nil {
+		return
+	}
+	err := func() error {
+		out, err := exec.Command("herdr", "--version").Output()
+		if err != nil {
+			return fmt.Errorf("herdr --version に失敗しました: %w", err)
+		}
+		f := strings.Fields(string(out))
+		if len(f) < 2 {
+			return fmt.Errorf("herdr の版を読めません: %q", out)
+		}
+		cmd := coder.SSH(name, herdrInstallScript(f[1]))
+		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("herdr %s の導入に失敗しました: %w", f[1], err)
+		}
+		add := exec.Command("herdr", "machine", "add", herdrHost(name), "--label", name)
+		add.Stdout, add.Stderr = os.Stderr, os.Stderr
+		return add.Run()
+	}()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+		fmt.Fprintf(os.Stderr, "herdr には端末で手で登録してください: herdr machine add %s --label %s\n", herdrHost(name), name)
+	}
+}
+
+// herdrInstallScript は herdr machine add が見る ~/.local/bin/herdr に version を入れるスクリプト。
+// 入れる版の URL と sha256 は herdr の配布マニフェストから引く。同じ版が入っていれば何もしない。
+func herdrInstallScript(version string) string {
+	return fmt.Sprintf(`set -eo pipefail
+b="$HOME/.local/bin/herdr" v=%[1]s
+[ "$("$b" --version 2>/dev/null)" = "herdr $v" ] && exit 0
+a="linux-$(uname -m)"
+m=$(curl -fsSL --retry 3 https://herdr.dev/latest.json)
+url=$(jq -r --arg v "$v" --arg a "$a" '.releases[$v].assets[$a] // empty' <<<"$m")
+sum=$(jq -r --arg v "$v" --arg a "$a" '.releases[$v].sha256[$a] // empty' <<<"$m")
+[ -n "$url" ] && [ -n "$sum" ] || { echo "herdr $v ($a) が配布マニフェストにありません" >&2; exit 1; }
+mkdir -p "$(dirname "$b")"
+curl -fsSL --retry 3 -o "$b.tmp" "$url"
+echo "$sum  $b.tmp" | sha256sum -c --quiet
+chmod +x "$b.tmp" && mv "$b.tmp" "$b"
+echo "herdr $v を $b に入れました" >&2`, coder.Quote(version))
 }
 
 func arg(args []string, i int) string {
@@ -301,6 +500,18 @@ func waitAgent(name string) error {
 		time.Sleep(5 * time.Second)
 	}
 	return fmt.Errorf("エージェントに接続できません（coder show %s で状態を確認してください）", name)
+}
+
+// provision は作成直後の workspace で agent を待ち、create.setup を流して bootstrap を待つ。
+func provision(cfg Config, name string) error {
+	if err := waitAgent(name); err != nil {
+		return err
+	}
+	// 失敗しても workspace は使えるので、警告に留めて bootstrap を待つ。
+	if err := setup(cfg, name); err != nil {
+		fmt.Fprintln(os.Stderr, "warning:", err)
+	}
+	return waitBootstrap(cfg, name)
 }
 
 // setup は config の create.setup を workspace で実行する。
