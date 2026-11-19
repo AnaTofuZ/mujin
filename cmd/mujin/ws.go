@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -355,10 +356,13 @@ func wsCommands() []*cobra.Command {
 	recreate.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに作り直す")
 
 	stop := &cobra.Command{
-		Use:   "stop <name...>",
+		Use:   "stop <name...> | stop --all",
 		Short: "workspace を停止する（中で動いているジョブも止まる）",
-		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			args, err := targets(args, all)
+			if err != nil {
+				return err
+			}
 			if err := confirm("停止", "動いているジョブも止まります", args, yes); err != nil {
 				return err
 			}
@@ -371,14 +375,18 @@ func wsCommands() []*cobra.Command {
 			return errors.Join(errs...)
 		},
 	}
+	stop.Flags().BoolVar(&all, "all", false, "動いている自分の workspace をすべて停止する")
 	stop.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに停止する")
 
 	restart := &cobra.Command{
-		Use:   "restart <name...>",
+		Use:   "restart <name...> | restart --all",
 		Short: "workspace を再起動し、使える状態になるまで待つ（中で動いているジョブは止まる）",
-		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			args, err = targets(args, all)
 			if err != nil {
 				return err
 			}
@@ -403,6 +411,7 @@ func wsCommands() []*cobra.Command {
 			return errors.Join(errs...)
 		},
 	}
+	restart.Flags().BoolVar(&all, "all", false, "動いている自分の workspace をすべて再起動する")
 	restart.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに再起動する")
 
 	var loginAll bool
@@ -442,7 +451,58 @@ func wsCommands() []*cobra.Command {
 	}
 	login.Flags().BoolVar(&loginAll, "all", false, "自分の workspace をすべて回る")
 
-	return []*cobra.Command{create, up, fw, status, ca, setupCmd, rm, recreate, stop, restart, login}
+	cmds := []*cobra.Command{create, up, fw, status, ca, setupCmd, rm, recreate, stop, restart, login}
+	for _, c := range cmds[1:] { // create は新しい名前を付けるので補完しない
+		c.ValidArgsFunction = completeWorkspaces(0)
+	}
+	for _, c := range []*cobra.Command{setupCmd, rm, recreate, stop, restart, login} {
+		c.ValidArgsFunction = completeWorkspaces(-1)
+	}
+	return cmds
+}
+
+// targets は stop と restart の対象を返す。all なら動いている自分の workspace すべて。
+func targets(args []string, all bool) ([]string, error) {
+	if !all {
+		if len(args) == 0 {
+			return nil, errors.New("ワークスペース名か --all を指定してください")
+		}
+		return args, nil
+	}
+	ws, err := coder.List()
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, w := range ws {
+		if w.LatestBuild.Status == "running" {
+			names = append(names, w.Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil, errors.New("動いている workspace がありません")
+	}
+	return names, nil
+}
+
+// completeWorkspaces はシェル補完で workspace 名を返す。pos 番目の引数だけ補完し、-1 なら何番目でも補完する。
+func completeWorkspaces(pos int) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+		if pos >= 0 && len(args) != pos {
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+		ws, err := coder.List()
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+		var names []string
+		for _, w := range ws {
+			if !slices.Contains(args, w.Name) {
+				names = append(names, w.Name)
+			}
+		}
+		return names, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // recreateArgs は w と同じテンプレート・パラメータで作る coder create の引数を返す。

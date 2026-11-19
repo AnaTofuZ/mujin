@@ -376,6 +376,9 @@ herdr agent prompt %[1]s %[3]s --wait --until working --until blocked --timeout 
 	}
 	places.Flags().BoolVar(&rescan, "rescan", false, "調べ直して上書きする")
 
+	dispatch.ValidArgsFunction = completeWorkspaces(0)
+	fetch.ValidArgsFunction = completeWorkspaces(1)
+	places.ValidArgsFunction = completeWorkspaces(0)
 	return []*cobra.Command{ls, dispatch, wait, read, send, attach, list, fetch, places}
 }
 
