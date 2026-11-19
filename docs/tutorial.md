@@ -12,7 +12,7 @@
 worker（各 workspace）に必要なもの:
 
 - `herdr` 0.9 系と `jq`
-- ログイン済みの `claude`
+- ログイン済みの `claude`（`mujin login --all` で、ログインしていない workspace を順に回れる）
 - ジョブを動かすリポジトリを、一度 `claude` で開いて信頼済みにしておく（未信頼だと起動時の確認で止まる）
 
 インストール:
@@ -153,4 +153,5 @@ dispatch が失敗したときは、worker に作った tab を mujin が閉じ�
 - **「agent mujin-jN が既に worker にいます」**: 前回の dispatch が通信の切断などで途中で終わり、tab が残っています。worker の herdr で `mujin` workspace のその tab を閉じてください。
 - **ジョブが `stopped` になる**: autostop で止まった可能性があります。`mujin ls` の DEADLINE で停止予定を確認できます。長いジョブは、管理者の運用に合わせて `--extend` で延ばすか、Coder の画面で延ばしてください。延ばせる上限はテンプレートの設定で決まります。
 - **worker の herdr に tab が溜まる**: 終わったジョブの tab は自動では閉じません。worker の herdr で `mujin` workspace の tab を閉じてください。
+- **claude のログインを workspace ごとに ssh してやるのが面倒**: `mujin login --all` を端末で実行すると、ログインしていない workspace だけを順に回って `claude auth login` を実行します。認証の URL は手元のブラウザで自動で開きます。開かなければ、表示された URL を開いてください。`mujin create` と `mujin recreate` も、端末から実行したときは最後にログインを求めます。
 - **ジョブの記録を消したい**: `~/.mujin/jobs/` のファイルを消すだけです。

@@ -4,11 +4,14 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -101,6 +104,11 @@ func wsCommands() []*cobra.Command {
 				return err
 			}
 			herdrAdd(name)
+			if isTTY() {
+				if err := claudeLogin(name); err != nil {
+					fmt.Fprintln(os.Stderr, "warning:", err)
+				}
+			}
 			if fwd {
 				return forward(cfg, name, nil)
 			}
@@ -248,7 +256,7 @@ func wsCommands() []*cobra.Command {
 		Short: "workspace を削除し、手元の herdr の machine 登録も消す",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			if err := confirm("削除", args, yes); err != nil {
+			if err := confirm("削除", "中のデータは消えます", args, yes); err != nil {
 				return err
 			}
 			var errs []error
@@ -302,7 +310,7 @@ func wsCommands() []*cobra.Command {
 				cargs[name] = recreateArgs(w, ps)
 				fmt.Fprintln(os.Stderr, "coder", strings.Join(cargs[name], " "))
 			}
-			if err := confirm("削除して作り直し", args, yes); err != nil {
+			if err := confirm("削除して作り直し", "中のデータは消えます", args, yes); err != nil {
 				return err
 			}
 			// bootstrap は workspace 側で並行に進むので、全台を作ってから順に待つ。
@@ -331,13 +339,110 @@ func wsCommands() []*cobra.Command {
 				}
 				herdrAdd(name)
 			}
+			// ブラウザでの認証は人間を待つので、bootstrap を全台待ってから順に聞く
+			if isTTY() {
+				for _, name := range made {
+					fmt.Fprintln(os.Stderr, "==", name)
+					if err := claudeLogin(name); err != nil {
+						fmt.Fprintln(os.Stderr, "warning:", err)
+					}
+				}
+			}
 			return errors.Join(errs...)
 		},
 	}
 	recreate.Flags().BoolVar(&all, "all", false, "自分の workspace をすべて作り直す")
 	recreate.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに作り直す")
 
-	return []*cobra.Command{create, up, fw, status, ca, setupCmd, rm, recreate}
+	stop := &cobra.Command{
+		Use:   "stop <name...>",
+		Short: "workspace を停止する（中で動いているジョブも止まる）",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			if err := confirm("停止", "動いているジョブも止まります", args, yes); err != nil {
+				return err
+			}
+			var errs []error
+			for _, name := range args {
+				if err := coder.Run("stop", name, "--yes"); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	stop.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに停止する")
+
+	restart := &cobra.Command{
+		Use:   "restart <name...>",
+		Short: "workspace を再起動し、使える状態になるまで待つ（中で動いているジョブは止まる）",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			cfg, err := loadConfig()
+			if err != nil {
+				return err
+			}
+			if err := confirm("再起動", "動いているジョブは止まります", args, yes); err != nil {
+				return err
+			}
+			var errs []error
+			for _, name := range args {
+				fmt.Fprintln(os.Stderr, "==", name)
+				if err := coder.Run("restart", name, "--yes"); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+					continue
+				}
+				if err := waitAgent(name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+					continue
+				}
+				if err := waitBootstrap(cfg, name); err != nil {
+					fmt.Fprintln(os.Stderr, "warning:", err)
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	restart.Flags().BoolVarP(&yes, "yes", "y", false, "確認せずに再起動する")
+
+	var loginAll bool
+	login := &cobra.Command{
+		Use:   "login [name...] | login --all",
+		Short: "workspace の claude にログインしていなければ、端末を繋いで claude auth login を実行する",
+		RunE: func(_ *cobra.Command, args []string) error {
+			if !isTTY() {
+				return errors.New("ブラウザでの認証が要るので、端末で実行してください")
+			}
+			if loginAll {
+				ws, err := coder.List()
+				if err != nil {
+					return err
+				}
+				args = nil
+				for _, w := range ws {
+					args = append(args, w.Name)
+				}
+			}
+			if len(args) == 0 {
+				name, err := pickWorkspace(args)
+				if err != nil {
+					return err
+				}
+				args = []string{name}
+			}
+			var errs []error
+			for _, name := range args {
+				fmt.Fprintln(os.Stderr, "==", name)
+				if err := claudeLogin(name); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", name, err))
+				}
+			}
+			return errors.Join(errs...)
+		},
+	}
+	login.Flags().BoolVar(&loginAll, "all", false, "自分の workspace をすべて回る")
+
+	return []*cobra.Command{create, up, fw, status, ca, setupCmd, rm, recreate, stop, restart, login}
 }
 
 // recreateArgs は w と同じテンプレート・パラメータで作る coder create の引数を返す。
@@ -349,8 +454,8 @@ func recreateArgs(w coder.Workspace, ps []coder.Parameter) []string {
 	return append(args, "--yes")
 }
 
-// confirm は消す前に人間に確かめる。対話できないときは --yes を求める。
-func confirm(what string, names []string, yes bool) error {
+// confirm は止めたり消したりする前に人間に確かめる。対話できないときは --yes を求める。
+func confirm(what, warn string, names []string, yes bool) error {
 	if yes {
 		return nil
 	}
@@ -358,7 +463,7 @@ func confirm(what string, names []string, yes bool) error {
 		return fmt.Errorf("対話できない環境です。%s してよければ --yes を付けてください", what)
 	}
 	ok := false
-	if err := survey.AskOne(&survey.Confirm{Message: fmt.Sprintf("%s を%sしますか（中のデータは消えます）", strings.Join(names, ", "), what)}, &ok); err != nil {
+	if err := survey.AskOne(&survey.Confirm{Message: fmt.Sprintf("%s を%sしますか（%s）", strings.Join(names, ", "), what, warn)}, &ok); err != nil {
 		return err
 	}
 	if !ok {
@@ -512,6 +617,62 @@ func provision(cfg Config, name string) error {
 		fmt.Fprintln(os.Stderr, "warning:", err)
 	}
 	return waitBootstrap(cfg, name)
+}
+
+// claudeLogin は workspace の claude がログインしていなければ、端末を繋いで claude auth login を実行する。
+// メールアドレスは手元の claude のものを入れておく。
+func claudeLogin(name string) error {
+	var st struct {
+		LoggedIn bool   `json:"loggedIn"`
+		Email    string `json:"email"`
+	}
+	out, _ := coder.Output(name, "claude auth status --json") // ログインしていないと終了コードが 0 でない
+	if json.Unmarshal([]byte(out), &st) == nil && st.LoggedIn {
+		fmt.Fprintln(os.Stderr, "ログイン済みです")
+		return nil
+	}
+	script := "claude auth login"
+	if b, err := exec.Command("claude", "auth", "status", "--json").Output(); err == nil && json.Unmarshal(b, &st) == nil && st.Email != "" {
+		script += " --email " + coder.Quote(st.Email)
+	}
+	// ログインだけでは、dispatch で起動した claude が初回の設定画面で止まる
+	script += ` && c="$HOME/.claude.json" && { [ -s "$c" ] || echo '{}' >"$c"; } && jq '.hasCompletedOnboarding = true' "$c" >"$c.tmp" && mv "$c.tmp" "$c"`
+	cmd := exec.Command("coder", "ssh", "-t", name, "--", "bash", "-lc", coder.Quote(script))
+	// worker ではブラウザを開けないので、表示された認証の URL を手元で開く
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, &urlOpener{w: os.Stdout, open: openBrowser}, os.Stderr
+	return cmd.Run()
+}
+
+// authURL は空白か端末の制御文字で終わった URL だけに当てる。途中までしか届いていない URL は開かない。
+var authURL = regexp.MustCompile(`https://[^\s\x1b]+[\s\x1b]`)
+
+// urlOpener は出力をそのまま w に流し、最初に現れた https の URL を open に渡す。
+type urlOpener struct {
+	w    io.Writer
+	open func(url string)
+	buf  []byte
+	done bool
+}
+
+func (o *urlOpener) Write(p []byte) (int, error) {
+	if !o.done {
+		o.buf = append(o.buf, p...)
+		if m := authURL.Find(o.buf); m != nil {
+			o.open(string(m[:len(m)-1]))
+			o.done, o.buf = true, nil
+		}
+	}
+	return o.w.Write(p)
+}
+
+func openBrowser(url string) {
+	name := "open"
+	if _, err := exec.LookPath(name); err != nil {
+		name = "xdg-open"
+	}
+	if err := exec.Command(name, url).Start(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: ブラウザを開けませんでした:", err)
+	}
 }
 
 // setup は config の create.setup を workspace で実行する。
